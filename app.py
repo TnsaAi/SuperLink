@@ -1,117 +1,124 @@
 from flask import Flask, render_template, redirect, url_for, flash, session, request
-from models import db, User, Profile
+from models import db, User, SocialCredential, SocialLink
 from config import Config
-from werkzeug.security import generate_password_hash, check_password_hash
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-import time
+from flask_login import LoginManager, login_user, current_user, logout_user, login_required
+from utils import follow_all
+from flask_migrate import Migrate
+from oauthlib.oauth2 import WebApplicationClient
+import requests
 
 app = Flask(__name__)
 app.config.from_object(Config)
 db.init_app(app)
+migrate = Migrate(app, db)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+client = WebApplicationClient(app.config['GOOGLE_CLIENT_ID'])
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form['username']
-        email = request.form['email']
-        password = request.form['password']
-        hashed_password = generate_password_hash(password, method='sha256')
-        new_user = User(username=username, email=email, password=hashed_password)
-        db.session.add(new_user)
-        db.session.commit()
-        flash('You have successfully registered!', 'success')
-        return redirect(url_for('index'))
-    return render_template('register.html')
-
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login')
 def login():
-    if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        user = User.query.filter_by(email=email).first()
-        if user and check_password_hash(user.password, password):
-            session['user_id'] = user.id
-            flash('You have successfully logged in!', 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Login Unsuccessful. Please check email and password', 'danger')
-    return render_template('login.html')
+    google_provider_cfg = requests.get(app.config['GOOGLE_DISCOVERY_URL']).json()
+    authorization_endpoint = google_provider_cfg["authorization_endpoint"]
+    request_uri = client.prepare_request_uri(
+        authorization_endpoint,
+        redirect_uri=request.base_url + "/callback",
+        scope=["openid", "email", "profile"],
+    )
+    return redirect(request_uri)
+
+@app.route('/login/callback')
+def callback():
+    code = request.args.get("code")
+    google_provider_cfg = requests.get(app.config['GOOGLE_DISCOVERY_URL']).json()
+    token_endpoint = google_provider_cfg["token_endpoint"]
+    token_url, headers, body = client.prepare_token_request(
+        token_endpoint,
+        authorization_response=request.url,
+        redirect_url=request.base_url,
+        code=code
+    )
+    token_response = requests.post(
+        token_url,
+        headers=headers,
+        data=body,
+        auth=(app.config['GOOGLE_CLIENT_ID'], app.config['GOOGLE_CLIENT_SECRET']),
+    )
+    client.parse_request_body_response(json.dumps(token_response.json()))
+
+    userinfo_endpoint = google_provider_cfg["userinfo_endpoint"]
+    uri, headers, body = client.add_token(userinfo_endpoint)
+    userinfo_response = requests.get(uri, headers=headers, data=body)
+
+    if userinfo_response.json().get("email_verified"):
+        unique_id = userinfo_response.json()["sub"]
+        users_email = userinfo_response.json()["email"]
+        users_name = userinfo_response.json()["name"]
+    else:
+        return "User email not available or not verified by Google.", 400
+
+    user = User.query.filter_by(email=users_email).first()
+    if not user:
+        user = User(
+            username=users_name, email=users_email, social_id=unique_id
+        )
+        db.session.add(user)
+        db.session.commit()
+
+    login_user(user)
+    return redirect(url_for("dashboard"))
 
 @app.route('/dashboard', methods=['GET', 'POST'])
+@login_required
 def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
-    user = User.query.get(session['user_id'])
-    if request.method == 'POST':
-        social_media_name = request.form['social_media_name']
-        social_media_url = request.form['social_media_url']
-        new_profile = Profile(user_id=user.id, social_media_name=social_media_name, social_media_url=social_media_url)
-        db.session.add(new_profile)
-        db.session.commit()
-        flash('Social media link added!', 'success')
-    
-    profiles = Profile.query.filter_by(user_id=user.id).all()
-    return render_template('dashboard.html', profiles=profiles, user=user)
+    credentials = SocialCredential.query.filter_by(user_id=current_user.id).all()
+    links = SocialLink.query.filter_by(user_id=current_user.id).all()
+    return render_template('dashboard.html', credentials=credentials, links=links)
 
-@app.route('/profile/<username>')
-def profile(username):
-    user = User.query.filter_by(username=username).first()
-    if not user:
-        return 'User not found', 404
-    profiles = Profile.query.filter_by(user_id=user.id).all()
-    return render_template('profile.html', profiles=profiles, user=user)
+@app.route('/add_credential', methods=['POST'])
+@login_required
+def add_credential():
+    platform = request.form['platform']
+    username = request.form['username']
+    password = request.form['password']
+    credential = SocialCredential(
+        user_id=current_user.id, platform=platform, username=username, password=password
+    )
+    db.session.add(credential)
+    db.session.commit()
+    return redirect(url_for('dashboard'))
 
-@app.route('/follow/<username>')
-def follow(username):
-    user = User.query.filter_by(username=username).first()
-    if not user:
-        return 'User not found', 404
+@app.route('/add_link', methods=['POST'])
+@login_required
+def add_link():
+    platform = request.form['platform']
+    link = request.form['link']
+    social_link = SocialLink(
+        user_id=current_user.id, platform=platform, link=link
+    )
+    db.session.add(social_link)
+    db.session.commit()
+    return redirect(url_for('dashboard'))
 
-    profiles = Profile.query.filter_by(user_id=user.id).all()
-
-    # Set up Selenium
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Ensure GUI is off
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-
-    driver = webdriver.Chrome(options=chrome_options)
-
-    try:
-        for profile in profiles:
-            driver.get(profile.social_media_url)
-            time.sleep(5)  # Adjust sleep time as needed to allow page to load
-            
-            # This part needs to be customized based on the social media page's structure
-            if profile.social_media_name.lower() == 'twitter':
-                follow_button = driver.find_element(By.XPATH, '//div[@data-testid="follow"]')
-                follow_button.click()
-            elif profile.social_media_name.lower() == 'facebook':
-                follow_button = driver.find_element(By.XPATH, '//button[contains(text(), "Follow")]')
-                follow_button.click()
-            # Add more social media platforms as needed
-            time.sleep(2)
-        
-        flash('Successfully followed all social media profiles!', 'success')
-    except Exception as e:
-        flash(f'Failed to follow social media profiles: {str(e)}', 'danger')
-    finally:
-        driver.quit()
-
-    return redirect(url_for('profile', username=username))
+@app.route('/follow_all')
+@login_required
+def follow_all_accounts():
+    credentials = SocialCredential.query.filter_by(user_id=current_user.id).all()
+    links = SocialLink.query.filter_by(user_id=current_user.id).all()
+    follow_all(credentials, links)
+    return redirect(url_for('dashboard'))
 
 @app.route('/logout')
 def logout():
-    session.pop('user_id', None)
-    flash('You have successfully logged out!', 'success')
+    logout_user()
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
