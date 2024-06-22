@@ -15,7 +15,7 @@ SuperLink/
 │       └── style.css
 ├── templates/
 │   └── index.html
-│   └── register.html
+│   └── register.html 
 │   └── login.html
 │   └── dashboard.html
 │   └── links.html
