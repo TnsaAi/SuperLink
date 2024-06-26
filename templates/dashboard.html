@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h1>Dashboard</h1>
+    <a href="{{ url_for('logout') }}">Logout</a>
+    <h2>Add Business</h2>
+    <form method="POST" action="{{ url_for('add_business') }}">
+        <p>
+            Name: <input type="text" name="name" required>
+        </p>
+        <p>
+            Superlink: <input type="text" name="superlink" required>
+        </p>
+        <p><input type="submit" value="Add Business"></p>
+    </form>
+    <h2>Your Businesses</h2>
+    <ul>
+        {% for business in businesses %}
+        <li><a href="{{ url_for('business', business_id=business.id) }}">{{ business.name }}</a></li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
