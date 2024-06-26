@@ -1,43 +1,32 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-import threading
+#Utilities for SuperLink
 
-def automate_follow(credential, link):
-    options = Options()
-    options.headless = True
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
 
-    try:
-        if credential.platform.lower() == 'twitter':
-            driver.get('https://twitter.com/login')
-            driver.find_element(By.NAME, 'session[username_or_email]').send_keys(credential.username)
-            driver.find_element(By.NAME, 'session[password]').send_keys(credential.password)
-            driver.find_element(By.XPATH, '//*[text()="Log in"]').click()
-            driver.get(link)
-            driver.find_element(By.XPATH, '//*[text()="Follow"]').click()
-        elif credential.platform.lower() == 'facebook':
-            driver.get('https://www.facebook.com/login')
-            driver.find_element(By.NAME, 'email').send_keys(credential.username)
-            driver.find_element(By.NAME, 'pass').send_keys(credential.password)
-            driver.find_element(By.NAME, 'login').click()
-            driver.get(link)
-            driver.find_element(By.XPATH, '//*[text()="Follow"]').click()
-        # Repeat for other platforms
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        driver.quit()
+db = SQLAlchemy()
 
-def follow_all(credentials, links):
-    threads = []
-    for credential in credentials:
-        for link in links:
-            if credential.platform.lower() == link.platform.lower():
-                thread = threading.Thread(target=automate_follow, args=(credential, link.link))
-                threads.append(thread)
-                thread.start()
-    for thread in threads:
-        thread.join()
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    social_id = db.Column(db.String(150), unique=True, nullable=False)
+
+class Business(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    superlink = db.Column(db.String(150), unique=True, nullable=False)
+
+class SocialCredential(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    business_id = db.Column(db.Integer, db.ForeignKey('business.id'), nullable=False)
+    platform = db.Column(db.String(100), nullable=False)
+    username = db.Column(db.String(100), nullable=False)
+    password = db.Column(db.String(100), nullable=False)
+
+class SocialLink(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    business_id = db.Column(db.Integer, db.ForeignKey('business.id'), nullable=False)
+    platform = db.Column(db.String(100), nullable=False)
+    link = db.Column(db.String(200), nullable=False)
+
+
