@@ -1,11 +1,16 @@
+#Web Backend for SuperLink
+
+
+
 from flask import Flask, render_template, redirect, url_for, flash, session, request
-from models import db, User, SocialCredential, SocialLink
+from models import db, User, Business, SocialCredential, SocialLink
 from config import Config
 from flask_login import LoginManager, login_user, current_user, logout_user, login_required
-from utils import follow_all
+from utils import trigger_zap
 from flask_migrate import Migrate
 from oauthlib.oauth2 import WebApplicationClient
 import requests
+import json
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -79,47 +84,82 @@ def callback():
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
-    credentials = SocialCredential.query.filter_by(user_id=current_user.id).all()
-    links = SocialLink.query.filter_by(user_id=current_user.id).all()
-    return render_template('dashboard.html', credentials=credentials, links=links)
+    businesses = Business.query.all()
+    return render_template('dashboard.html', businesses=businesses)
+
+@app.route('/business/<int:business_id>', methods=['GET', 'POST'])
+@login_required
+def business(business_id):
+    business = Business.query.get_or_404(business_id)
+    credentials = SocialCredential.query.filter_by(business_id=business.id).all()
+    links = SocialLink.query.filter_by(business_id=business.id).all()
+    return render_template('business.html', business=business, credentials=credentials, links=links)
+
+@app.route('/add_business', methods=['POST'])
+@login_required
+def add_business():
+    name = request.form['name']
+    superlink = request.form['superlink']
+    business = Business(
+        name=name, superlink=superlink
+    )
+    db.session.add(business)
+    db.session.commit()
+    return redirect(url_for('dashboard'))
 
 @app.route('/add_credential', methods=['POST'])
 @login_required
 def add_credential():
+    business_id = request.form['business_id']
     platform = request.form['platform']
     username = request.form['username']
     password = request.form['password']
     credential = SocialCredential(
-        user_id=current_user.id, platform=platform, username=username, password=password
+        business_id=business_id, platform=platform, username=username, password=password
     )
     db.session.add(credential)
     db.session.commit()
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('business', business_id=business_id))
 
 @app.route('/add_link', methods=['POST'])
 @login_required
 def add_link():
+    business_id = request.form['business_id']
     platform = request.form['platform']
     link = request.form['link']
     social_link = SocialLink(
-        user_id=current_user.id, platform=platform, link=link
+        business_id=business_id, platform=platform, link=link
     )
     db.session.add(social_link)
     db.session.commit()
-    return redirect(url_for('dashboard'))
 
-@app.route('/follow_all')
-@login_required
-def follow_all_accounts():
-    credentials = SocialCredential.query.filter_by(user_id=current_user.id).all()
-    links = SocialLink.query.filter_by(user_id=current_user.id).all()
-    follow_all(credentials, links)
-    return redirect(url_for('dashboard'))
+    payload = {
+        "platform": platform,
+        "link": link,
+        "business_name": Business.query.get(business_id).name
+    }
+    status_code, response = trigger_zap(payload)
+    if status_code != 200:
+        flash('Failed to trigger Zapier automation.', 'danger')
 
-@app.route('/logout')
-def logout():
-    logout_user()
-    return redirect(url_for('index'))
+    return redirect(url_for('business', business_id=business_id))
+
+@app.route('/follow/<string:superlink>')
+def follow_superlink(superlink):
+    business = Business.query.filter_by(superlink=superlink).first_or_404()
+    credentials = SocialCredential.query.filter_by(business_id=business.id).all()
+    links = SocialLink.query.filter_by(business_id=business.id).all()
+
+    payload = {
+        "credentials": [{"platform": c.platform, "username": c.username, "password": c.password} for c in credentials],
+        "links": [{"platform": l.platform, "link": l.link} for l in links],
+        "user_id": current_user.id
+    }
+    status_code, response = trigger_zap(payload)
+    if status_code != 200:
+        flash('Failed to follow all social media accounts.', 'danger')
+
+    return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
     app.run(debug=True)
