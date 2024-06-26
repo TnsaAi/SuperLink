@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ business.name }}</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h1>{{ business.name }}</h1>
+    <a href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+    <h2>Add Social Media Credential</h2>
+    <form method="POST" action="{{ url_for('add_credential') }}">
+        <input type="hidden" name="business_id" value="{{ business.id }}">
+        <p>
+            Platform: <input type="text" name="platform" required>
+        </p>
+        <p>
+            Username: <input type="text" name="username" required>
+        </p>
+        <p>
+            Password: <input type="password" name="password" required>
+        </p>
+        <p><input type="submit" value="Add Credential"></p>
+    </form>
+    <h2>Add Social Media Link</h2>
+    <form method="POST" action="{{ url_for('add_link') }}">
+        <input type="hidden" name="business_id" value="{{ business.id }}">
+        <p>
+            Platform: <input type="text" name="platform" required>
+        </p>
+        <p>
+            Link: <input type="url" name="link" required>
+        </p>
+        <p><input type="submit" value="Add Link"></p>
+    </form>
+    <h2>Your Social Media Credentials</h2>
+    <ul>
+        {% for credential in credentials %}
+        <li>{{ credential.platform }}: {{ credential.username }}</li>
+        {% endfor %}
+    </ul>
+    <h2>Your Social Media Links</h2>
+    <ul>
+        {% for link in links %}
+        <li>{{ link.platform }}: <a href="{{ link.link }}">{{ link.link }}</a></li>
+        {% endfor %}
+    </ul>
+    <h2>Follow All</h2>
+    <a href="{{ url_for('follow_superlink', superlink=business.superlink) }}">Follow All Social Media Accounts</a>
+</body>
+</html>
