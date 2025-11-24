@@ -3,6 +3,8 @@
 
 #Project Structure
 
+```text
+
 SuperLink/
 ├── app.py
 ├── config.py
@@ -20,4 +22,4 @@ SuperLink/
 │   └── dashboard.html
 │   └── links.html
 └── migrations/
-
+```
